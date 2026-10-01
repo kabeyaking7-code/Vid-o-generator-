@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Studio Vidéo IA</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{--bg:#0f1117;--card:#1a1d27;--in:#12141c;--line:#2a2f3d;--ink:#eef0f6;--dim:#9aa1b5;--acc:#7c5cff;--ok:#2ecc71;--err:#ff6b6b}
+body{font:15px/1.5 system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--ink);max-width:640px;margin:0 auto;padding:16px 14px 80px}
+h1{font-size:1.4rem}.sub{color:var(--dim);font-size:.85rem;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.t{font-size:.72rem;letter-spacing:.07em;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
+input[type=password],textarea{width:100%;background:var(--in);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:11px;font:inherit}
+textarea{min-height:110px;resize:vertical}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.chip{padding:8px 13px;border:1px solid var(--line);border-radius:999px;background:var(--in);color:var(--ink);font:inherit;font-size:.85rem;cursor:pointer}
+.chip.on{border-color:var(--acc);background:#2a2250}
+.btn{width:100%;padding:15px;border:0;border-radius:12px;background:var(--acc);color:#fff;font:inherit;font-weight:600;font-size:1rem;cursor:pointer;margin-top:4px}
+.btn:disabled{background:#3a3f52;color:#8a90a5}
+.btn.sec{background:var(--in);border:1px solid var(--line);font-weight:500;font-size:.9rem;padding:11px}
+.hide{display:none!important}
+#status{margin:10px 0;padding:11px;border-radius:10px;background:var(--in);font-size:.9rem}
+#status.err{color:var(--err)}#status.ok{color:var(--ok)}
+video{width:100%;border-radius:12px;background:#000;max-height:70vh}
+a.lnk{display:block;text-align:center;margin-top:10px;color:#b6a4ff}
+#prev{position:relative;margin-top:10px}#prev img{width:100%;border-radius:10px;display:block}
+#prev button{position:absolute;top:8px;right:8px;width:32px;height:32px;border-radius:50%;border:0;background:#000b;color:#fff}
+.h{padding:10px 0;border-top:1px solid var(--line);font-size:.85rem}
+.h:first-child{border-top:0}.h small{color:var(--dim);display:block}.h a{color:#b6a4ff}
+</style>
+</head>
+<body>
+<h1>🎬 Studio Vidéo IA</h1>
+<div class="sub">Décrivez une scène, ajoutez une photo si vous voulez, l'IA fait la vidéo.</div>
+
+<div class="card">
+  <div class="t">Clé API Agnes</div>
+  <input type="password" id="key" placeholder="Collez votre clé API (sk-...)" autocomplete="off" spellcheck="false">
+  <button class="btn sec" id="saveKey" type="button" style="margin-top:8px">💾 Enregistrer la clé</button>
+</div>
+
+<div class="card">
+  <div class="t">Votre idée</div>
+  <textarea id="prompt" placeholder="Ex : Un renard roux traverse une forêt enneigée au lever du soleil, la caméra le suit doucement."></textarea>
+</div>
+
+<div class="card">
+  <div class="t">Style</div>
+  <div class="row" id="styles"></div>
+</div>
+
+<div class="card">
+  <div class="t">Format et durée</div>
+  <div class="row" id="orient" style="margin-bottom:8px"></div>
+  <div class="row" id="dur"></div>
+</div>
+
+<div class="card">
+  <div class="t">Photo de référence (optionnel)</div>
+  <input type="file" id="file" accept="image/*" class="hide">
+  <button class="btn sec" id="pick" type="button">📷 Ajouter une photo</button>
+  <div id="prev" class="hide"><img id="img" alt=""><button id="rm" type="button">✕</button></div>
+</div>
+
+<button class="btn" id="go" type="button" disabled>🎬 Créer la vidéo</button>
+<button class="btn sec hide" id="stop" type="button">⏹ Arrêter</button>
+<div id="status" class="hide"></div>
+
+<div class="card hide" id="res">
+  <div class="t">Résultat</div>
+  <div id="vid"></div>
+  <div id="dl"></div>
+</div>
+
+<div class="card hide" id="histCard">
+  <div class="t">Dernières vidéos</div>
+  <div id="hist"></div>
+  <button class="btn sec" id="clr" type="button" style="margin-top:8px">Vider l'historique</button>
+</div>
+
+<script>
+const API='https://apihub.agnes-ai.com/v1',POLL='https://apihub.agnes-ai.com/agnesapi',MODEL='agnes-video-v2.0';
+const KS='studio_video_key',HS='studio_video_hist';
+const $=id=>document.getElementById(id);
+const S={style:'none',orient:'portrait',frames:241,image:null,run:false,stop:false,tag:''};
+
+const STYLES=[
+ ['none','Libre',''],
+ ['cine','Cinéma','cinematic, realistic lighting, shallow depth of field, smooth camera movement'],
+ ['3d','3D animé','3D animation, soft rounded characters, warm lighting, high quality'],
+ ['anime','Anime','anime style, hand-drawn feel, soft watercolor backgrounds'],
+ ['clay','Pâte à modeler','claymation stop-motion style, handmade texture'],
+ ['neon','Néon','glowing neon style, luminous colors, light trails'],
+ ['doc','Documentaire','documentary style, natural light, handheld realism']
+];
+
+function chips(id,items,key){
+  const box=$(id);
+  items.forEach(([v,l])=>{
+    const b=document.createElement('button');
+    b.type='button';b.className='chip'+(S[key]===v?' on':'');b.textContent=l;
+    b.onclick=()=>{S[key]=v;[...box.children].forEach(c=>c.classList.toggle('on',c===b));refresh()};
+    box.appendChild(b);
+  });
+}
+chips('styles',STYLES.map(s=>[s[0],s[1]]),'style');
+chips('orient',[['portrait','📱 Vertical 9:16'],['landscape','🖥️ Horizontal 16:9']],'orient');
+chips('dur',[[121,'⏱️ 5 s'],[241,'⏱️ 10 s'],[441,'⏱️ 18 s'],['chain','⏱️ 60 s (6 clips)']],'frames');
+
+/* stockage */
+const getKey=()=>{try{return(localStorage.getItem(KS)||'').trim()}catch(e){return''}};
+const setKey=v=>{try{v?localStorage.setItem(KS,v):localStorage.removeItem(KS)}catch(e){}};
+const getHist=()=>{try{return JSON.parse(localStorage.getItem(HS)||'[]')}catch(e){return[]}};
+const putHist=h=>{try{localStorage.setItem(HS,JSON.stringify(h.slice(0,15)))}catch(e){}};
+
+function setStatus(t,type){
+  const s=$('status');
+  if(!t){s.classList.add('hide');return}
+  s.className=type||'';s.textContent=(type?'':S.tag)+t;
+}
+function refresh(){
+  const ok=getKey()&&$('prompt').value.trim()&&!S.run;
+  $('go').disabled=!ok;
+  $('go').textContent=!getKey()?'🔑 Ajoutez votre clé API':!$('prompt').value.trim()?'✍️ Écrivez votre idée':'🎬 Créer la vidéo'+(S.frames==='chain'?' de 60 s (6 clips)':'');
+}
+$('key').value=getKey()?'••••••••••••':'';
+$('saveKey').onclick=()=>{
+  const v=$('key').value.trim();
+  if(v.startsWith('•'))return setStatus('Clé déjà enregistrée','ok');
+  setKey(v);setStatus(v?'Clé enregistrée ✓':'Clé supprimée',v?'ok':'');refresh();
+};
+$('prompt').oninput=refresh;
+
+/* image */
+$('pick').onclick=()=>$('file').click();
+$('file').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  if(!f.type.startsWith('image/'))return setStatus('Ce fichier n\'est pas une image','err');
+  const u=URL.createObjectURL(f),im=new Image();
+  im.onload=()=>{
+    const k=Math.min(1,1280/Math.max(im.width,im.height)),c=document.createElement('canvas');
+    c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);
+    c.getContext('2d').drawImage(im,0,0,c.width,c.height);
+    S.image=c.toDataURL('image/jpeg',.85);URL.revokeObjectURL(u);
+    $('img').src=S.image;$('prev').classList.remove('hide');$('pick').textContent='📷 Changer la photo';
+  };
+  im.onerror=()=>setStatus('Image illisible','err');
+  im.src=u;
+};
+$('rm').onclick=()=>{S.image=null;$('file').value='';$('prev').classList.add('hide');$('pick').textContent='📷 Ajouter une photo'};
+
+/* prompt */
+function buildPrompt(){
+  const st=STYLES.find(s=>s[0]===S.style)[2];
+  return $('prompt').value.trim()+'. '+(st?'Visual style: '+st+'. ':'')+
+    'Format: '+(S.orient==='portrait'?'portrait 9:16 vertical':'landscape 16:9 horizontal')+
+    ', 24fps, smooth natural motion. No text overlays, no watermarks.';
+}
+
+/* réseau */
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function wait(sec,label){
+  for(let r=sec;r>0;r--){if(S.stop)throw new Error('Arrêté');setStatus(label+' ('+r+'s)');await sleep(1000)}
+}
+async function api(url,opt){
+  const w429=[15,30,45,60,90,120],w503=[5,10,15,20,30,45],wn=[3,5,8,12,20,30];
+  for(let i=0;i<6;i++){
+    if(S.stop)throw new Error('Arrêté');
+    try{
+      const r=await fetch(url,opt);
+      if(r.status===429){await wait(w429[i],'Serveur très sollicité');continue}
+      if(r.status===503){await wait(w503[i],'Préparation');continue}
+      return r;
+    }catch(e){
+      if(e.message==='Arrêté')throw e;
+      await wait(wn[i],'Connexion en cours');
+    }
+  }
+  return fetch(url,opt);
+}
+async function create(prompt,img,frames){
+  const body={model:MODEL,prompt:prompt,num_frames:frames,frame_rate:24};
+  if(img)body.image=img;
+  const r=await api(API+'/videos',{method:'POST',headers:{Authorization:'Bearer '+getKey(),'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok)throw new Error('HTTP '+r.status+' — '+(await r.text()).slice(0,200));
+  const d=await r.json();
+  const id=d.video_id||d.id||d.task_id;
+  if(!id)throw new Error('Aucun identifiant de vidéo reçu');
+  return id;
+}
+async function poll(id){
+  let prog=0;
+  for(let i=0;i<120;i++){
+    if(i>0)await wait(6,'🎬 Création en cours '+prog+'%');
+    const r=await api(POLL+'?video_id='+encodeURIComponent(id)+'&model_name='+encodeURIComponent(MODEL),{headers:{Authorization:'Bearer '+getKey()}});
+    const d=await r.json();
+    const st=d.status||'unknown';prog=d.progress||0;
+    setStatus('🎬 Création en cours '+prog+'%');
+    if(['completed','succeeded','done'].includes(st)){
+      const u=(d.metadata&&d.metadata.url)||d.url||(d.output&&d.output.url);
+      if(!u)throw new Error('Vidéo terminée mais sans lien');
+      return u;
+    }
+    if(['failed','error','cancelled'].includes(st))throw new Error('Échec ('+st+')');
+  }
+  throw new Error('Délai maximal dépassé');
+}
+
+/* écran allumé pendant la génération */
+let lock=null;
+async function keepAwake(on){
+  try{
+    if(on&&navigator.wakeLock)lock=await navigator.wakeLock.request('screen');
+    else if(lock){await lock.release();lock=null}
+  }catch(e){}
+}
+
+/* résultat + historique */
+let P=[],pv=null,pk=0;
+function resetPlayer(){P=[];pv=null;pk=0;$('vid').textContent='';$('dl').textContent=''}
+function showClips(us){
+  P=us.slice();
+  if(!pv){
+    pv=document.createElement('video');
+    pv.src=P[0];pv.controls=true;pv.playsInline=true;pv.autoplay=true;pv.muted=true;
+    pv.onended=()=>{if(pk<P.length-1){pk++;pv.src=P[pk];pv.play()}};
+    $('vid').appendChild(pv);
+  }
+  const box=$('dl');box.textContent='';
+  P.forEach((u,i)=>{
+    const a=document.createElement('a');a.className='lnk';a.href=u;a.target='_blank';a.rel='noopener';
+    a.textContent='⬇️ '+(P.length>1?'Clip '+(i+1):'Ouvrir / télécharger');box.appendChild(a);
+  });
+  $('res').classList.remove('hide');
+}
+function renderHist(){
+  const h=getHist(),box=$('hist');
+  box.textContent='';
+  $('histCard').classList.toggle('hide',!h.length);
+  h.forEach(x=>{
+    const d=document.createElement('div');d.className='h';
+    const p=document.createElement('div');p.textContent=x.p.length>90?x.p.slice(0,90)+'…':x.p;
+    const m=document.createElement('small');m.textContent=new Date(x.t).toLocaleString('fr-FR');
+    d.append(p,m);
+    (x.us||[x.u]).forEach((u,i,arr)=>{
+      const a=document.createElement('a');a.href=u;a.target='_blank';a.rel='noopener';
+      a.textContent=arr.length>1?'▶ Clip '+(i+1):'▶ Ouvrir';a.style.marginRight='12px';d.appendChild(a);
+    });
+    box.appendChild(d);
+  });
+}
+function saveClips(c){
+  const h=getHist();h.unshift({p:$('prompt').value.trim(),us:c,t:Date.now()});putHist(h);renderHist();
+}
+$('clr').onclick=()=>{putHist([]);renderHist()};
+
+/* dernière image d'un clip (sert de photo de référence au clip suivant) */
+function lastFrame(url){
+  return new Promise(res=>{
+    const v=document.createElement('video');
+    v.crossOrigin='anonymous';v.muted=true;v.preload='auto';v.playsInline=true;
+    const t=setTimeout(()=>res(null),20000);
+    v.onerror=()=>{clearTimeout(t);res(null)};
+    v.onloadedmetadata=()=>{v.currentTime=Math.max(0,v.duration-0.1)};
+    v.onseeked=()=>{
+      try{
+        const k=Math.min(1,1280/Math.max(v.videoWidth,v.videoHeight)),c=document.createElement('canvas');
+        c.width=Math.round(v.videoWidth*k);c.height=Math.round(v.videoHeight*k);
+        c.getContext('2d').drawImage(v,0,0,c.width,c.height);
+        clearTimeout(t);res(c.toDataURL('image/jpeg',.85));
+      }catch(e){clearTimeout(t);res(null)}
+    };
+    v.src=url;
+  });
+}
+
+/* lancement : 1 clip, ou 6 clips enchaînés pour 60 s */
+const one=async(p,img,fr)=>poll(await create(p,img,fr));
+$('go').onclick=async()=>{
+  S.run=true;S.stop=false;refresh();resetPlayer();
+  $('stop').classList.remove('hide');$('res').classList.add('hide');
+  setStatus('Envoi de la demande…');keepAwake(true);
+  const chain=S.frames==='chain',n=chain?6:1,fr=chain?241:S.frames,base=buildPrompt(),clips=[];
+  let img=S.image,weak=false;
+  try{
+    for(let i=0;i<n;i++){
+      S.tag=chain?'Clip '+(i+1)+'/'+n+' · ':'';
+      const p=i===0?base:base+' Scene '+(i+1)+' of '+n+' of the same continuous story: keep the same characters, setting and style'+(img?', continuing from the reference image':'')+'.';
+      clips.push(await one(p,img,fr));
+      showClips(clips);
+      if(i<n-1){
+        setStatus('Récupération de la dernière image…');
+        const f=await lastFrame(clips[i]);
+        if(f)img=f;else{img=S.image;weak=true}
+      }
+    }
+    saveClips(clips);S.tag='';
+    setStatus('Votre vidéo est prête ✓'+(weak?' (certains clips enchaînés par le texte seulement)':''),'ok');
+  }catch(e){
+    if(clips.length)saveClips(clips);
+    const st=e.message==='Arrêté';
+    setStatus(st?'Génération arrêtée':'Erreur : '+e.message,st?'':'err');
+  }finally{
+    S.tag='';S.run=false;$('stop').classList.add('hide');keepAwake(false);refresh();
+  }
+};
+$('stop').onclick=()=>{S.stop=true};
+
+refresh();renderHist();
+</script>
+</body>
+</html>
