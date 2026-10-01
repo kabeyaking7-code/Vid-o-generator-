@@ -1,0 +1,39 @@
+name: Build Android APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Créer le projet Android
+        run: |
+          mkdir -p www
+          cp index.html www/index.html
+          npm init -y
+          npm i @capacitor/core@8 @capacitor/cli@8 @capacitor/android@8
+          cat > capacitor.config.json <<'EOF'
+          {
+            "appId": "com.studiovideoia.app",
+            "appName": "Studio Vidéo IA",
+            "webDir": "www",
+            "plugins": { "CapacitorHttp": { "enabled": true } }
+          }
+          EOF
+          npx cap add android
+          npx cap sync android
+      - name: Compiler l'APK
+        run: cd android && ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: studio-video-ia-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
